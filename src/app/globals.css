@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: #ffffff;
+  color: #0b1210;
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* Soft blurred "mesh" gradient for the landing background, in the brand palette
+   (turquesa + verde menta + crema + dorado). Oversize the element and clip it
+   with overflow-hidden on the parent so the blurred edges stay off-screen. */
+.mesh-bg {
+  background-color: #eef6f2;
+  background-image:
+    radial-gradient(at 16% 24%, rgba(45, 170, 155, 0.55) 0px, transparent 55%),
+    radial-gradient(at 85% 14%, rgba(240, 228, 196, 0.80) 0px, transparent 50%),
+    radial-gradient(at 10% 84%, rgba(120, 205, 190, 0.50) 0px, transparent 55%),
+    radial-gradient(at 90% 82%, rgba(232, 210, 158, 0.65) 0px, transparent 50%),
+    radial-gradient(at 55% 50%, rgba(200, 235, 226, 0.55) 0px, transparent 60%);
+  filter: blur(50px);
+}
+
+/* Accessibility floor: always-visible keyboard focus */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
+input[type="tel"]::-webkit-outer-spin-button,
+input[type="tel"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

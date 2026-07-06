@@ -1,0 +1,19 @@
+Hola claude!
+Vamos a usar este skill para crear una app pero para un salon de belleza.
+Algunos cambios:
+La melcocha de barberia vamos a reemplazarla por una melcocha usando los colores del logo que esta en la carpeta del proyecto: "logo sey"
+En Nombre del barbero: Zeidy Rodriguez
+Nombre de la barbería: Fusion Salon
+¿Logo?: Si, sale como "logo sey" en la carpeta del proyecto
+Acceso del barbero
+Usuario: z.rodriguez
+Contraseña: zeidy.rodriguez
+Horario
+9am-6pm (La hora de cierre es a las 6pm)
+Cerrado Martes y Domingo
+No vamos a servicio de envio de correos.
+Usa la zona horaria que tienes por defecto.
+Para los precios, usa el archivo "Lista_de_Precios_Servicios.xlsx"
+Usa un drop down para agruparlos asi: Tratamientos - Lavados y estilizados - Colorimetria - Extensiones y trenzas.
+Los servicios que dicen "Por cotizar" ponles la descripcion de: El precio depende de una evaluacion previa.
+No, no tengo un proyecto en supabase, crea uno.
