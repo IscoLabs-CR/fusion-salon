@@ -281,6 +281,14 @@ export default function Wizard({ config }: { config: SalonConfig }) {
                 </select>
               </label>
 
+              <ul className="mt-3 space-y-1.5 text-xs text-muted">
+                <li>
+                  Luego de 15 minutos sin presentarse, la cita pierde validez y
+                  deberá reagendarse.
+                </li>
+                <li>El precio por diagnóstico previo es de 5.000 colones.</li>
+              </ul>
+
               {serviceInfo && <ServiceCard service={serviceInfo} />}
 
               {serviceInfo && (
