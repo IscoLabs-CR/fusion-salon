@@ -629,7 +629,9 @@ function NotifBell({
         <>
           {/* Fondo para cerrar al tocar fuera */}
           <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
-          <div className="absolute right-0 top-12 z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-line bg-paper shadow-2xl">
+          {/* En celular: fijo al viewport con márgenes (inset-x-4) para que no se
+              corte a la izquierda. En sm+: dropdown anclado bajo la campana. */}
+          <div className="fixed inset-x-4 top-16 z-50 overflow-hidden rounded-2xl border border-line bg-paper shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-80">
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <p className="font-display text-sm font-semibold uppercase tracking-wide text-ink">
                 Reservas
