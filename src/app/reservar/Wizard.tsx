@@ -5,14 +5,14 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import type { SalonConfig, SalonBarber, SalonService } from "@/lib/salon";
 import { buildAppointmentICS, downloadICS } from "@/lib/calendar";
+import MonthCalendar from "@/components/MonthCalendar";
 import {
   type Slot,
   type BusyRow,
   getService,
   generateDaySlots,
-  upcomingDates,
-  dateParts,
-  isClosedDay,
+  bookingWindow,
+  isSelectableDay,
   longDateLabel,
   priceLabel,
   servicesByCategory,
@@ -66,7 +66,7 @@ export default function Wizard({ config }: { config: SalonConfig }) {
   const serviceInfo: SalonService | null = service
     ? getService(config, service) ?? null
     : null;
-  const dates = upcomingDates(21, config.timezone);
+  const bookWindow = bookingWindow(config);
 
   function selectBarber(b: SalonBarber) {
     setBarber(b);
@@ -78,7 +78,9 @@ export default function Wizard({ config }: { config: SalonConfig }) {
   }
 
   function selectDate(d: string) {
-    if (isClosedDay(config, d)) return;
+    // Además del día cerrado, frena las fechas pasadas y las que se pasan del
+    // horizonte de reserva del salón.
+    if (!isSelectableDay(config, d, bookWindow)) return;
     setDateStr(d);
     setService(null);
     setSlot(null);
@@ -218,40 +220,12 @@ export default function Wizard({ config }: { config: SalonConfig }) {
 
           {step === 1 && (
             <Section title="Elegí el día">
-              <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">
-                {dates.map((d) => {
-                  const p = dateParts(d);
-                  const closed = isClosedDay(config, d);
-                  const active = dateStr === d;
-                  return (
-                    <button
-                      key={d}
-                      type="button"
-                      disabled={closed}
-                      onClick={() => selectDate(d)}
-                      aria-label={closed ? "Cerrado" : longDateLabel(d)}
-                      className={[
-                        "flex flex-col items-center rounded-2xl border px-2 py-3 transition-colors",
-                        closed
-                          ? "cursor-not-allowed border-line bg-line/40 text-muted/60"
-                          : active
-                            ? "border-brand bg-brand text-white"
-                            : "border-line bg-paper text-ink hover:border-brand hover:bg-brand-tint",
-                      ].join(" ")}
-                    >
-                      <span className="text-[11px] uppercase tracking-wider">
-                        {p.weekdayShort}
-                      </span>
-                      <span className="font-mono text-xl font-medium leading-tight">
-                        {p.day}
-                      </span>
-                      <span className="text-[11px] lowercase">
-                        {closed ? "cerrado" : p.monthShort}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              <MonthCalendar
+                config={config}
+                value={dateStr}
+                onChange={selectDate}
+                window={bookWindow}
+              />
             </Section>
           )}
 

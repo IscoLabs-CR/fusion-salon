@@ -230,6 +230,104 @@ export function longDateLabel(dateStr: string): string {
   return `${p.weekdayFull} ${p.day} de ${p.monthFull}`;
 }
 
+/* ------------------------------------------------------------------ meses */
+
+export interface Month {
+  year: number;
+  month: number; // 1..12
+}
+
+export function monthOf(dateStr: string): Month {
+  const [year, month] = dateStr.split("-").map(Number);
+  return { year, month };
+}
+
+export function addMonths(m: Month, n: number): Month {
+  const idx = m.year * 12 + (m.month - 1) + n;
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
+}
+
+/** Primer día del mes, como YYYY-MM-DD. */
+export function monthStart(m: Month): string {
+  return `${m.year}-${m.month.toString().padStart(2, "0")}-01`;
+}
+
+/** "julio 2026", para la cabecera del calendario. */
+export function monthLabel(m: Month): string {
+  return `${MONTHS_FULL[m.month - 1]} ${m.year}`;
+}
+
+/**
+ * Celdas de la cuadrícula de un mes, EMPEZANDO EN LUNES. Los huecos previos al
+ * día 1 y posteriores al último van en `null`, para que cada día caiga siempre
+ * bajo su columna de día de la semana. El largo siempre es múltiplo de 7.
+ */
+export function monthGrid(m: Month): (string | null)[] {
+  const first = monthStart(m);
+  // dowFromDateStr da 0 = Domingo; la grilla arranca en lunes, así que se rota.
+  const lead = (dowFromDateStr(first) + 6) % 7;
+  const cells: (string | null)[] = Array.from({ length: lead }, () => null);
+  for (let d = first; monthOf(d).month === m.month; d = addDaysStr(d, 1)) {
+    cells.push(d);
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+/* ------------------------------------------------- ventana de reserva */
+
+export interface BookingWindow {
+  minDate: string; // primer día agendable (hoy, en zona del salón), inclusive
+  maxDate: string; // último día agendable, inclusive
+}
+
+/** De hoy hasta el horizonte del salón (`theme.booking_horizon_days`, 60 por
+ *  defecto). Es lo que frena las flechas del calendario. */
+export function bookingWindow(config: SalonConfig): BookingWindow {
+  const minDate = shopToday(config.timezone);
+  return {
+    minDate,
+    maxDate: addDaysStr(minDate, Math.max(1, config.bookingHorizonDays) - 1),
+  };
+}
+
+/**
+ * ¿Se puede elegir este día? Tiene que estar abierto y caer dentro de la ventana.
+ * Las fechas YYYY-MM-DD ordenan lexicográficamente, así que alcanza con comparar
+ * los strings — no hace falta parsearlas.
+ */
+export function isSelectableDay(
+  config: SalonConfig,
+  dateStr: string,
+  win: BookingWindow,
+): boolean {
+  if (isClosedDay(config, dateStr)) return false;
+  return dateStr >= win.minDate && dateStr <= win.maxDate;
+}
+
+/** Días ABIERTOS de un rango inclusivo. Los cerrados se omiten: ya son
+ *  inasignables, no hace falta gastar un bloqueo en ellos. */
+export function openDaysInRange(
+  config: SalonConfig,
+  fromStr: string,
+  toStr: string,
+): string[] {
+  const days: string[] = [];
+  for (let d = fromStr; d <= toStr; d = addDaysStr(d, 1)) {
+    if (!isClosedDay(config, d)) days.push(d);
+  }
+  return days;
+}
+
+/** Cuántos días calendario abarca un rango inclusivo (28 jul → 4 ago = 8). */
+export function rangeLengthDays(fromStr: string, toStr: string): number {
+  const [y1, m1, d1] = fromStr.split("-").map(Number);
+  const [y2, m2, d2] = toStr.split("-").map(Number);
+  const from = Date.UTC(y1, m1 - 1, d1);
+  const to = Date.UTC(y2, m2 - 1, d2);
+  return Math.floor((to - from) / 86_400_000) + 1;
+}
+
 export interface WeekRange {
   startStr: string; // Lunes (YYYY-MM-DD)
   endStr: string; // Lunes siguiente, exclusivo (YYYY-MM-DD)

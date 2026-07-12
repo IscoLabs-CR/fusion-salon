@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Appointment } from "@/lib/types";
 import type { SalonConfig, SalonService } from "@/lib/salon";
+import MonthCalendar from "@/components/MonthCalendar";
 import {
   type Slot,
   type BusyRow,
+  type BookingWindow,
   getService,
   generateDaySlots,
   shopInstant,
@@ -26,6 +28,8 @@ import {
   weekRangeLabel,
   dayHours,
   hoursWindow,
+  openDaysInRange,
+  rangeLengthDays,
   SLOT_STEP_MIN,
 } from "@/lib/booking";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -1155,6 +1159,13 @@ function NewAppointmentModal({
 
 /* ---------------------------------------------------------- block modal */
 
+// Cuánto puede mirar hacia adelante el estilista para bloquear. Es más que el
+// horizonte del cliente a propósito: las vacaciones de diciembre se cierran en
+// agosto, mucho antes de que nadie pueda agendar en esas fechas.
+const BLOCK_LOOKAHEAD_DAYS = 365;
+
+type BlockMode = "time" | "days";
+
 function BlockModal({
   supabase,
   config,
@@ -1170,6 +1181,7 @@ function BlockModal({
   onClose: () => void;
   onDone: (d: string) => void;
 }) {
+  const [mode, setMode] = useState<BlockMode>("time");
   const [date, setDate] = useState(defaultDate);
   const win = hoursWindow(config);
   // Horario del día elegido (o la ventana más amplia si cae en un día cerrado).
@@ -1179,12 +1191,101 @@ function BlockModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Rango de días completos (vacaciones, viajes).
+  const [fromDate, setFromDate] = useState(defaultDate);
+  const [toDate, setToDate] = useState(defaultDate);
+  // El conteo viaja con el rango que lo produjo, para no mostrar el número del
+  // rango anterior mientras la consulta del nuevo sigue en vuelo.
+  const [conflicts, setConflicts] = useState<{ key: string; count: number } | null>(
+    null,
+  );
+
+  const tz = config.timezone;
+  const blockWindow: BookingWindow = useMemo(() => {
+    const minDate = shopToday(tz);
+    return { minDate, maxDate: addDaysStr(minDate, BLOCK_LOOKAHEAD_DAYS) };
+  }, [tz]);
+
+  const openDays = openDaysInRange(config, fromDate, toDate);
+  const rangeKey = `${fromDate}:${toDate}`;
+  const conflictCount = conflicts?.key === rangeKey ? conflicts.count : 0;
+
+  // Bloquear NO cancela lo que ya está agendado, así que hay que avisarlo antes
+  // de que se vaya de vacaciones creyendo que la agenda quedó limpia.
+  useEffect(() => {
+    if (mode !== "days" || toDate < fromDate) return;
+    let cancelled = false;
+    (async () => {
+      const { count, error } = await supabase
+        .from("appointments")
+        .select("id", { count: "exact", head: true })
+        .eq("kind", "booking")
+        .eq("barber_id", barberId)
+        .gte("start_time", shopInstant(fromDate, 0, tz).toISOString())
+        .lt("start_time", shopInstant(addDaysStr(toDate, 1), 0, tz).toISOString());
+      if (error) console.error("No se pudo revisar el rango:", error.message);
+      if (!cancelled)
+        setConflicts({ key: `${fromDate}:${toDate}`, count: count ?? 0 });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, mode, fromDate, toDate, barberId, tz]);
+
   // Al cambiar de día, reencuadrá el rango dentro del horario de ese día.
   function pickDate(d: string) {
     const h = dayHours(config, d) ?? win;
     setDate(d);
     setStartMin(h.openMin);
     setEndMin(h.openMin + SLOT_STEP_MIN);
+  }
+
+  function pickFrom(d: string) {
+    setFromDate(d);
+    setError(null);
+    // Arrastrar el final evita el estado inválido de "hasta" antes que "desde".
+    if (toDate < d) setToDate(d);
+  }
+
+  // Un bloqueo por día abierto, de la apertura al cierre. Los días cerrados se
+  // saltean: ya son inasignables, no hace falta gastar una fila en ellos.
+  async function submitRange() {
+    if (toDate < fromDate) {
+      setError("El día final debe ser posterior al inicial.");
+      return;
+    }
+    const span = rangeLengthDays(fromDate, toDate);
+    if (span > config.bookingHorizonDays) {
+      setError(
+        `No se pueden bloquear más de ${config.bookingHorizonDays} días de una vez.`,
+      );
+      return;
+    }
+    if (openDays.length === 0) {
+      setError("No hay días abiertos en ese rango.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const rows = openDays.flatMap((d) => {
+      const h = dayHours(config, d);
+      if (!h) return [];
+      return [
+        {
+          barber_id: barberId,
+          start_time: shopInstant(d, h.openMin, tz).toISOString(),
+          end_time: shopInstant(d, h.closeMin, tz).toISOString(),
+          kind: "block",
+        },
+      ];
+    });
+    const { error } = await supabase.from("appointments").insert(rows);
+    setSubmitting(false);
+    if (error) {
+      setError("No se pudieron crear los bloqueos. Intentá de nuevo.");
+      return;
+    }
+    onDone(fromDate);
   }
 
   const startOptions: number[] = [];
@@ -1218,67 +1319,184 @@ function BlockModal({
   return (
     <Modal title="Bloquear horario" onClose={onClose}>
       <div className="grid grid-cols-1 gap-4">
-        <p className="text-sm text-muted">
-          Reservá tiempo para vos. Las clientas no podrán agendar dentro de ese
-          rango.
-        </p>
-
-        <div>
-          <p className="mb-2 text-sm font-medium text-ink">Día</p>
-          <DayChips config={config} value={date} onChange={pickDate} />
+        <div className="grid grid-cols-2 gap-1 rounded-full border border-line bg-line/30 p-1">
+          <ModeTab
+            active={mode === "time"}
+            onClick={() => {
+              setMode("time");
+              setError(null);
+            }}
+          >
+            Un rato
+          </ModeTab>
+          <ModeTab
+            active={mode === "days"}
+            onClick={() => {
+              setMode("days");
+              setError(null);
+            }}
+          >
+            Días completos
+          </ModeTab>
         </div>
 
-        <div className="grid grid-cols-1 gap-3">
-          <label className="block min-w-0">
-            <span className="mb-1.5 block text-sm font-medium text-ink">
-              Desde
-            </span>
-            <select
-              value={startMin}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setStartMin(v);
-                if (endMin <= v) setEndMin(v + SLOT_STEP_MIN);
-              }}
-              className="w-full min-w-0 rounded-xl border border-line px-3 py-2.5 font-mono text-ink outline-none focus:border-brand"
-            >
-              {startOptions.map((m) => (
-                <option key={m} value={m}>
-                  {minutesToLabel(m)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block min-w-0">
-            <span className="mb-1.5 block text-sm font-medium text-ink">
-              Hasta
-            </span>
-            <select
-              value={endMin}
-              onChange={(e) => setEndMin(Number(e.target.value))}
-              className="w-full min-w-0 rounded-xl border border-line px-3 py-2.5 font-mono text-ink outline-none focus:border-brand"
-            >
-              {endOptions.map((m) => (
-                <option key={m} value={m}>
-                  {minutesToLabel(m)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        {mode === "time" ? (
+          <>
+            <p className="text-sm text-muted">
+              Reservá tiempo para vos. Las clientas no podrán agendar dentro de
+              ese rango.
+            </p>
 
-        {error && <ModalError>{error}</ModalError>}
+            <div>
+              <p className="mb-2 text-sm font-medium text-ink">Día</p>
+              <DayChips config={config} value={date} onChange={pickDate} />
+            </div>
 
-        <button
-          type="button"
-          onClick={submit}
-          disabled={submitting}
-          className="mt-1 inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 font-display font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep disabled:opacity-60"
-        >
-          {submitting ? "Guardando…" : "Bloquear"}
-        </button>
+            <div className="grid grid-cols-1 gap-3">
+              <label className="block min-w-0">
+                <span className="mb-1.5 block text-sm font-medium text-ink">
+                  Desde
+                </span>
+                <select
+                  value={startMin}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setStartMin(v);
+                    if (endMin <= v) setEndMin(v + SLOT_STEP_MIN);
+                  }}
+                  className="w-full min-w-0 rounded-xl border border-line px-3 py-2.5 font-mono text-ink outline-none focus:border-brand"
+                >
+                  {startOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {minutesToLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block min-w-0">
+                <span className="mb-1.5 block text-sm font-medium text-ink">
+                  Hasta
+                </span>
+                <select
+                  value={endMin}
+                  onChange={(e) => setEndMin(Number(e.target.value))}
+                  className="w-full min-w-0 rounded-xl border border-line px-3 py-2.5 font-mono text-ink outline-none focus:border-brand"
+                >
+                  {endOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {minutesToLabel(m)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {error && <ModalError>{error}</ModalError>}
+
+            <button
+              type="button"
+              onClick={submit}
+              disabled={submitting}
+              className="mt-1 inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 font-display font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep disabled:opacity-60"
+            >
+              {submitting ? "Guardando…" : "Bloquear"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted">
+              Cerrá varios días de corrido (vacaciones, un viaje). Se bloquea el
+              día completo, de la apertura al cierre.
+            </p>
+
+            <div>
+              <p className="mb-2 text-sm font-medium text-ink">Desde</p>
+              <MonthCalendar
+                config={config}
+                value={fromDate}
+                onChange={pickFrom}
+                window={blockWindow}
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-medium text-ink">Hasta</p>
+              <MonthCalendar
+                config={config}
+                value={toDate}
+                onChange={(d) => {
+                  setToDate(d);
+                  setError(null);
+                }}
+                window={{ minDate: fromDate, maxDate: blockWindow.maxDate }}
+              />
+            </div>
+
+            <p className="text-sm text-muted">
+              {openDays.length === 0
+                ? "No hay días abiertos en ese rango."
+                : `Se van a cerrar ${openDays.length} ${
+                    openDays.length === 1 ? "día" : "días"
+                  }: ${longDateLabel(openDays[0])}${
+                    openDays.length > 1
+                      ? ` → ${longDateLabel(openDays[openDays.length - 1])}`
+                      : ""
+                  }.`}
+            </p>
+
+            {conflictCount > 0 && (
+              <p className="rounded-xl border border-gold/40 bg-gold/10 px-4 py-2.5 text-sm text-gold-deep">
+                Ya tenés {conflictCount}{" "}
+                {conflictCount === 1 ? "cita agendada" : "citas agendadas"} en
+                ese rango. Bloquear no {conflictCount === 1 ? "la" : "las"}{" "}
+                cancela: avisale a{" "}
+                {conflictCount === 1 ? "la clienta" : "las clientas"} y{" "}
+                {conflictCount === 1 ? "eliminala" : "eliminalas"} a mano.
+              </p>
+            )}
+
+            {error && <ModalError>{error}</ModalError>}
+
+            <button
+              type="button"
+              onClick={submitRange}
+              disabled={submitting || openDays.length === 0}
+              className="mt-1 inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 font-display font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep disabled:opacity-60"
+            >
+              {submitting
+                ? "Guardando…"
+                : `Bloquear ${openDays.length} ${
+                    openDays.length === 1 ? "día" : "días"
+                  }`}
+            </button>
+          </>
+        )}
       </div>
     </Modal>
+  );
+}
+
+function ModeTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={[
+        "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+        active ? "bg-paper text-ink shadow-sm" : "text-muted hover:text-ink",
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
 

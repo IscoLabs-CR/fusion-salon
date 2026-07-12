@@ -47,6 +47,9 @@ export interface SalonConfig {
   timezone: string;
   theme: Record<string, unknown>;
   maxBookingsPerSlot: number;
+  /** Cuántos días hacia adelante puede agendar un cliente, contando hoy. Es el
+   *  tope que frena las flechas del calendario. */
+  bookingHorizonDays: number;
   barbers: SalonBarber[];
   categories: SalonCategory[];
   services: SalonService[];
@@ -75,18 +78,30 @@ interface RawSalon {
   hours: Record<string, { open_min: number; close_min: number }>;
 }
 
+/** Lee un entero del `theme` jsonb del salón, con respaldo si no viene. */
+function themeInt(
+  theme: Record<string, unknown>,
+  key: string,
+  fallback: number,
+): number {
+  const v = theme[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
 function shape(raw: RawSalon): SalonConfig {
   const hoursByDow: (DayHours | null)[] = Array.from({ length: 7 }, () => null);
   for (const [dow, h] of Object.entries(raw.hours ?? {})) {
     hoursByDow[Number(dow)] = { openMin: h.open_min, closeMin: h.close_min };
   }
+  const theme = raw.theme ?? {};
   return {
     id: raw.id,
     slug: raw.slug,
     name: raw.name,
     timezone: raw.timezone,
-    theme: raw.theme ?? {},
+    theme,
     maxBookingsPerSlot: raw.max_bookings_per_slot,
+    bookingHorizonDays: themeInt(theme, "booking_horizon_days", 60),
     barbers: (raw.barbers ?? []).map((b) => ({
       id: b.id,
       name: b.name,
