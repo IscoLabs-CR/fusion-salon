@@ -8,8 +8,10 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Fusion Salon — Reservas",
     short_name: "Fusion Salon",
     description:
-      "Agenda de citas de Fusion Salon: recibí un aviso cada vez que entra una reserva.",
-    start_url: "/barbero",
+      "Fusion Salon: reservá tu cita en segundos, o si trabajás en el salón, llevá tu agenda.",
+    // Abre en la portada (no en /barbero): así el cliente ve "Reservar cita" y el
+    // equipo entra a su agenda con "Soy Barbero", sin caer en el login.
+    start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait",

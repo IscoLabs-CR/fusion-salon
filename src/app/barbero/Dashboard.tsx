@@ -46,7 +46,8 @@ type ModalState =
   | null
   | { type: "new" }
   | { type: "block" }
-  | { type: "reschedule"; appt: Appointment };
+  | { type: "reschedule"; appt: Appointment }
+  | { type: "editService"; appt: Appointment };
 
 interface WeekStats {
   expected: number;
@@ -336,6 +337,7 @@ export default function Dashboard({
                   config={config}
                   onDelete={() => removeAppt(a.id)}
                   onReschedule={() => setModal({ type: "reschedule", appt: a })}
+                  onEditService={() => setModal({ type: "editService", appt: a })}
                 />
               ))}
             </ul>
@@ -377,6 +379,19 @@ export default function Dashboard({
       )}
       {modal?.type === "reschedule" && (
         <RescheduleModal
+          supabase={supabase}
+          config={config}
+          appt={modal.appt}
+          onClose={() => setModal(null)}
+          onDone={(d) => {
+            setModal(null);
+            setDateStr(d);
+            load(d);
+          }}
+        />
+      )}
+      {modal?.type === "editService" && (
+        <EditServiceModal
           supabase={supabase}
           config={config}
           appt={modal.appt}
@@ -753,11 +768,13 @@ function AgendaRow({
   config,
   onDelete,
   onReschedule,
+  onEditService,
 }: {
   appt: Appointment;
   config: SalonConfig;
   onDelete: () => void;
   onReschedule: () => void;
+  onEditService: () => void;
 }) {
   const isBlock = appt.kind === "block";
   const svc = appt.service_slug ? getService(config, appt.service_slug) : null;
@@ -814,12 +831,20 @@ function AgendaRow({
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {!isBlock && (
-            <button
-              onClick={onReschedule}
-              className="text-xs font-medium text-brand hover:text-brand-deep"
-            >
-              Reagendar
-            </button>
+            <>
+              <button
+                onClick={onEditService}
+                className="text-xs font-medium text-brand hover:text-brand-deep"
+              >
+                Servicio
+              </button>
+              <button
+                onClick={onReschedule}
+                className="text-xs font-medium text-brand hover:text-brand-deep"
+              >
+                Reagendar
+              </button>
+            </>
           )}
           <button
             onClick={onDelete}
@@ -1600,6 +1625,93 @@ function RescheduleModal({
           className="mt-1 inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 font-display font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep disabled:opacity-60"
         >
           {submitting ? "Guardando…" : "Guardar cambios"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------- edit service modal */
+
+// Cambiar el servicio de una cita ya creada (p. ej. el cliente terminó tomando un
+// servicio distinto o adicional al que reservó). Mantiene la hora de inicio;
+// recalcula end_time con la duración del nuevo servicio. El precio no se guarda en
+// la cita (se deriva del catálogo), así que la agenda y el panel semanal se ajustan solos.
+function EditServiceModal({
+  supabase,
+  config,
+  appt,
+  onClose,
+  onDone,
+}: {
+  supabase: SupabaseClient;
+  config: SalonConfig;
+  appt: Appointment;
+  onClose: () => void;
+  onDone: (d: string) => void;
+}) {
+  // Día calendario de la cita en la zona del salón (para recargar ese día al terminar).
+  const dayStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: config.timezone,
+  }).format(new Date(appt.start_time));
+
+  const [service, setService] = useState<string>(
+    appt.service_slug ?? config.services[0]?.slug ?? "",
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const unchanged = service === appt.service_slug;
+
+  async function submit() {
+    if (!service) {
+      setError("Elegí un servicio.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    // Recalcula el fin con la duración del nuevo servicio, manteniendo el inicio.
+    const dur = getService(config, service)?.durationMin ?? 30;
+    const newEnd = new Date(
+      new Date(appt.start_time).getTime() + dur * 60_000,
+    ).toISOString();
+    const { error } = await supabase
+      .from("appointments")
+      .update({ service_slug: service, end_time: newEnd })
+      .eq("id", appt.id);
+    setSubmitting(false);
+    if (error) {
+      // Los mensajes del trigger del servidor ya vienen legibles (p. ej. si el
+      // servicio más largo se solapa con otra cita: "No hay campo en ese horario").
+      setError(error.message || "No se pudo cambiar el servicio. Intentá de nuevo.");
+      return;
+    }
+    onDone(dayStr);
+  }
+
+  return (
+    <Modal title="Cambiar servicio" onClose={onClose}>
+      <div className="grid grid-cols-1 gap-4">
+        <div className="rounded-xl border border-line bg-line/30 px-4 py-3 text-sm">
+          <span className="font-medium text-ink">{appt.client_name}</span>
+          <span className="text-muted">
+            {" "}
+            · {longDateLabel(dayStr)} ·{" "}
+            {formatShopTime(appt.start_time, config.timezone)}
+          </span>
+        </div>
+
+        <ServiceSelect config={config} value={service} onChange={setService} />
+
+        {error && <ModalError>{error}</ModalError>}
+
+        <button
+          type="button"
+          onClick={submit}
+          disabled={submitting || unchanged}
+          className="mt-1 inline-flex items-center justify-center rounded-full bg-brand px-6 py-3 font-display font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep disabled:opacity-60"
+        >
+          {submitting ? "Guardando…" : "Guardar servicio"}
         </button>
       </div>
     </Modal>
