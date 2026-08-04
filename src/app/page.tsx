@@ -21,6 +21,33 @@ export default async function Home() {
       />
       <div className="w-full max-w-xl">
         <div className="relative overflow-hidden rounded-[2rem] bg-paper shadow-[0_30px_90px_-45px_rgba(15,118,110,0.45)] ring-1 ring-black/5">
+          {/* Acceso del equipo. Va DENTRO del card, en su esquina: en celular el
+              card ocupa casi todo el ancho, así que flotarlo sobre la página lo
+              dejaría montado sobre el borde redondeado. Apagado y lejos del botón
+              de reservar, para que ninguna clienta lo toque por error. */}
+          <Link
+            href="/barbero/login"
+            aria-label="Acceso estilista"
+            title="Acceso estilista"
+            className="absolute right-4 top-4 z-10 grid h-10 w-10 place-items-center rounded-full text-muted/70 transition-colors hover:bg-brand-tint hover:text-brand sm:right-5 sm:top-5"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <path d="m10 17 5-5-5-5" />
+              <path d="M15 12H3" />
+            </svg>
+          </Link>
+
           <div className="px-8 py-12 text-center sm:px-14 sm:py-16">
             {/* Logo sobre placa negra (el archivo tiene fondo negro, así calza) */}
             <div className="mx-auto mb-7 grid h-36 w-36 place-items-center overflow-hidden rounded-3xl bg-[#0b1210] ring-1 ring-gold/40 sm:h-40 sm:w-40">
@@ -53,18 +80,14 @@ export default async function Home() {
               y sin filas.
             </p>
 
-            <div className="mx-auto mt-9 flex max-w-xs flex-col gap-3">
+            {/* Un solo llamado a la acción: la clienta no puede equivocarse de
+                botón. El acceso del equipo vive en la esquina del card. */}
+            <div className="mx-auto mt-9 max-w-xs">
               <Link
                 href="/reservar"
-                className="inline-flex items-center justify-center rounded-full bg-brand px-6 py-4 font-display text-lg font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep"
+                className="inline-flex w-full items-center justify-center rounded-full bg-brand px-6 py-4 font-display text-lg font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep"
               >
                 Reservar cita
-              </Link>
-              <Link
-                href="/barbero/login"
-                className="inline-flex items-center justify-center rounded-full border border-gold/60 px-6 py-3.5 text-sm font-medium text-ink transition-colors hover:border-brand hover:text-brand"
-              >
-                Soy la estilista
               </Link>
             </div>
 
