@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import type { SalonConfig, SalonBarber, SalonService } from "@/lib/salon";
-import { buildAppointmentICS, downloadICS } from "@/lib/calendar";
+import { type CalendarEvent, icsUrl, openInCalendar } from "@/lib/calendar";
 import MonthCalendar from "@/components/MonthCalendar";
 import {
   type Slot,
@@ -677,18 +677,19 @@ function SuccessScreen({
   const [showPrompt, setShowPrompt] = useState(true);
   const [added, setAdded] = useState(false);
 
+  const event: CalendarEvent = {
+    id: data.id,
+    serviceLabel: data.serviceLabel,
+    shopName,
+    slug,
+    stylistName: data.stylistName,
+    clientName: data.name,
+    start: data.start,
+    end: data.end,
+  };
+
   function addToCalendar() {
-    const ics = buildAppointmentICS({
-      id: data.id,
-      serviceLabel: data.serviceLabel,
-      shopName,
-      slug,
-      stylistName: data.stylistName,
-      clientName: data.name,
-      start: data.start,
-      end: data.end,
-    });
-    downloadICS(ics, `cita-${slug}.ics`);
+    openInCalendar(event);
     setAdded(true);
     setShowPrompt(false);
   }
@@ -771,12 +772,18 @@ function SuccessScreen({
             onClick={() => (added ? addToCalendar() : setShowPrompt(true))}
             className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 font-display font-semibold uppercase tracking-wide text-white transition-colors hover:bg-brand-deep"
           >
-            {added ? "Descargar de nuevo" : "Agregar a mi calendario"}
+            {added ? "Abrir el calendario otra vez" : "Agregar a mi calendario"}
           </button>
           {added && (
             <p className="-mt-1 text-xs text-muted">
-              Abrí el archivo descargado para guardar la cita. Te recordará 2
-              horas antes.
+              ¿No se abrió tu calendario?{" "}
+              <a
+                href={icsUrl(event)}
+                className="font-medium text-brand underline underline-offset-2"
+              >
+                Abrí el archivo de la cita
+              </a>
+              .
             </p>
           )}
           <button
@@ -841,8 +848,9 @@ function CalendarPrompt({
           ¿Agregar al calendario?
         </h2>
         <p className="mt-2 text-sm text-muted">
-          Guardá la cita en el calendario de tu teléfono. Te recordará{" "}
-          <strong className="text-ink">2 horas antes</strong>.
+          Se abre el calendario de tu teléfono con{" "}
+          <strong className="text-ink">los datos de la cita ya cargados</strong>
+          . Solo confirmá para guardarla.
         </p>
         <div className="mt-6 flex flex-col gap-2.5">
           <button
