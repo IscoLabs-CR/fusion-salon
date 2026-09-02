@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Appointment } from "@/lib/types";
@@ -15,6 +15,7 @@ import {
   shopInstant,
   addDaysStr,
   shopToday,
+  shopDateOf,
   formatShopTime,
   longDateLabel,
   upcomingDates,
@@ -77,6 +78,11 @@ export default function Dashboard({
   const [notifs, setNotifs] = useState<Appointment[]>([]);
   const [unseen, setUnseen] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
+  // Buscador de clientes: lo que escribe el admin + las citas futuras sobre las
+  // que se filtra. `futureLoaded` evita volver a traerlas en cada tecla.
+  const [query, setQuery] = useState("");
+  const [future, setFuture] = useState<Appointment[] | null>(null);
+  const futureLoaded = useRef(false);
 
   const load = useCallback(
     async (d: string) => {
@@ -139,10 +145,32 @@ export default function Dashboard({
     setNotifs((data ?? []) as Appointment[]);
   }, [supabase]);
 
+  // Todas las citas futuras (de ahora en adelante) para el buscador. Se traen
+  // UNA vez —cuando el admin empieza a escribir— y el filtrado ocurre en memoria,
+  // así la búsqueda responde en cada tecla sin volver a la base.
+  const loadFuture = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("*")
+      .eq("kind", "booking")
+      .gte("start_time", new Date().toISOString())
+      .order("start_time")
+      .limit(500);
+    if (error)
+      console.error("No se pudieron cargar las citas futuras:", error.message);
+    setFuture((data ?? []) as Appointment[]);
+  }, [supabase]);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadNotifs();
   }, [loadNotifs]);
+
+  useEffect(() => {
+    if (query.trim().length === 0 || futureLoaded.current) return;
+    futureLoaded.current = true;
+    loadFuture();
+  }, [query, loadFuture]);
 
   useEffect(() => {
     // Carga la agenda del día desde Supabase; el setState ocurre tras resolver
@@ -172,6 +200,7 @@ export default function Dashboard({
         (payload) => {
           load(dateStr);
           loadWeek();
+          if (futureLoaded.current) loadFuture();
           // Un cliente acaba de reservar: mostrarlo en notificaciones y encender
           // el punto rojo hasta que abra el panel.
           if (payload.eventType === "INSERT") {
@@ -189,7 +218,7 @@ export default function Dashboard({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, barberId, dateStr, load, loadWeek]);
+  }, [supabase, barberId, dateStr, load, loadWeek, loadFuture]);
 
   function toggleNotif() {
     setNotifOpen((open) => {
@@ -214,6 +243,33 @@ export default function Dashboard({
     await supabase.auth.signOut();
     router.push("/barbero/login");
     router.refresh();
+  }
+
+  // Coincidencias por nombre (sin importar mayúsculas ni tildes) o por teléfono
+  // (comparando solo dígitos, para que "8888-8888" y "88888888" sean lo mismo).
+  const results = useMemo(() => {
+    const q = query.trim();
+    if (q.length === 0 || !future) return [];
+    const name = normalizeText(q);
+    const digits = digitsOnly(q);
+    return future.filter((a) => {
+      const byName =
+        name.length > 0 && normalizeText(a.client_name ?? "").includes(name);
+      const byPhone =
+        digits.length >= 3 && digitsOnly(a.client_phone ?? "").includes(digits);
+      return byName || byPhone;
+    });
+  }, [query, future]);
+
+  // Al tocar un resultado la agenda salta a ese día y baja hasta la lista.
+  function openResult(d: string) {
+    setDateStr(d);
+    setQuery("");
+    requestAnimationFrame(() => {
+      document
+        .getElementById("agenda")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   const isToday = dateStr === shopToday(tz);
@@ -263,6 +319,16 @@ export default function Dashboard({
       <div className="mx-auto w-full max-w-3xl px-5 pb-20">
         {/* Notificaciones push: instalar la app + activar avisos por reserva */}
         <PushSetup supabase={supabase} barberId={barberId} />
+
+        {/* Buscar citas futuras de un cliente */}
+        <ClientSearch
+          query={query}
+          onQuery={setQuery}
+          results={results}
+          loading={future === null}
+          config={config}
+          onPick={openResult}
+        />
 
         {/* Ingresos de la semana */}
         {week && <WeeklyPanel week={week} />}
@@ -318,7 +384,7 @@ export default function Dashboard({
         </div>
 
         {/* Agenda */}
-        <div className="mt-6">
+        <div id="agenda" className="mt-6 scroll-mt-4">
           {loading ? (
             <p className="py-12 text-center text-muted">Cargando agenda…</p>
           ) : appts.length === 0 ? (
@@ -705,6 +771,152 @@ function NotifBell({
             )}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------- buscar clientes */
+
+/** Minúsculas y sin tildes: así "José" aparece buscando "jose" o "JOSE". */
+function normalizeText(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+/** Solo los dígitos, para que "8888-8888", "+506 8888 8888" y "88888888" sean
+ *  el mismo teléfono al buscar. */
+function digitsOnly(s: string): string {
+  return s.replace(/\D/g, "");
+}
+
+// Barra de búsqueda del admin: encuentra las citas FUTURAS de un cliente por
+// nombre o teléfono y lleva la agenda al día de la cita elegida.
+function ClientSearch({
+  query,
+  onQuery,
+  results,
+  loading,
+  config,
+  onPick,
+}: {
+  query: string;
+  onQuery: (v: string) => void;
+  results: Appointment[];
+  loading: boolean;
+  config: SalonConfig;
+  onPick: (dateStr: string) => void;
+}) {
+  const q = query.trim();
+
+  return (
+    <div className="mt-6">
+      <div className="relative">
+        <span
+          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted"
+          aria-hidden
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+        </span>
+        <input
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Buscar por nombre o teléfono"
+          aria-label="Buscar citas futuras por nombre o teléfono"
+          autoComplete="off"
+          className="w-full rounded-full border border-line bg-paper py-3 pl-11 pr-11 text-ink outline-none placeholder:text-muted focus:border-brand"
+        />
+        {q.length > 0 && (
+          <button
+            onClick={() => onQuery("")}
+            aria-label="Limpiar búsqueda"
+            className="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-muted transition-colors hover:bg-line hover:text-brand"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {q.length > 0 && (
+        <div className="mt-3 overflow-hidden rounded-2xl border border-line bg-paper">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+            <p className="font-display text-xs font-semibold uppercase tracking-wide text-ink">
+              Próximas citas
+            </p>
+            <p className="text-xs text-muted">
+              {loading
+                ? "Buscando…"
+                : `${results.length} ${results.length === 1 ? "resultado" : "resultados"}`}
+            </p>
+          </div>
+
+          {loading ? (
+            <p className="px-4 py-8 text-center text-sm text-muted">
+              Buscando…
+            </p>
+          ) : results.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-muted">
+              Ningún cliente con citas futuras coincide con “{q}”.
+            </p>
+          ) : (
+            <ul className="max-h-80 overflow-y-auto">
+              {results.map((a) => {
+                const svc = a.service_slug
+                  ? getService(config, a.service_slug)
+                  : null;
+                const d = shopDateOf(a.start_time, config.timezone);
+                return (
+                  <li
+                    key={a.id}
+                    className="border-b border-line last:border-b-0"
+                  >
+                    <button
+                      onClick={() => onPick(d)}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-line/40"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-display text-sm font-semibold uppercase tracking-wide text-ink">
+                          {a.client_name ?? "Cliente"}
+                        </p>
+                        <p className="text-xs text-muted">
+                          {longDateLabel(d)} ·{" "}
+                          {formatShopTime(a.start_time, config.timezone)}
+                          {svc && ` · ${svc.label}`}
+                        </p>
+                        {a.client_phone && (
+                          <p className="font-mono text-xs text-muted">
+                            {a.client_phone}
+                          </p>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-xs font-medium text-brand">
+                        Ver día ›
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <p className="border-t border-line px-4 py-2 text-[11px] text-muted/80">
+            Solo se muestran citas de hoy en adelante.
+          </p>
+        </div>
       )}
     </div>
   );

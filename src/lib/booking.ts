@@ -169,6 +169,11 @@ export function shopToday(tz: string): string {
   return formatInTimeZone(new Date(), tz, "yyyy-MM-dd");
 }
 
+/** Día (YYYY-MM-DD) al que pertenece un instante en la zona del salón. */
+export function shopDateOf(d: Date | string, tz: string): string {
+  return formatInTimeZone(new Date(d), tz, "yyyy-MM-dd");
+}
+
 const WEEKDAYS_SHORT = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const WEEKDAYS_FULL = [
   "Domingo",
